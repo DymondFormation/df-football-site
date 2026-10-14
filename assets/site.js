@@ -456,11 +456,10 @@ async function rankings(data) {
   };
   let sampleValue = savedWindow,
     modeValue = ["total", "per95"].includes(savedMode) ? savedMode : "per95",
-    rows = [],
+    appearances = [],
     limit = 50,
     sortKey = "metric",
     sortDirection = -1;
-  const cache = new Map();
   const icons = {
     regions:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18m0-18a15 15 0 0 0 0 18"/></svg>',
@@ -574,18 +573,57 @@ async function rankings(data) {
     history.replaceState(null, "", params.toString() ? `?${params}` : location.pathname);
   }
 
-  function filteredRows(except = "") {
+  function filteredRows(except = "", includeContext = true) {
     const roleSearch = position.value.trim().toLowerCase();
     const teamSearch = team.value.trim().toLowerCase();
-    return rows.filter(
+    return appearances.filter(
       (r) =>
         (except === "regions" || !selected.regions.size || selected.regions.has(r.region_name)) &&
         (except === "competitions" || !selected.competitions.size || selected.competitions.has(String(r.source_competition_id))) &&
         (except === "dates" || !selected.dates.size || (r.next_match_scheduled_start_utc && selected.dates.has(fixtureDateKey(r.next_match_scheduled_start_utc)))) &&
         (except === "kickoffs" || !selected.kickoffs.size || (r.next_match_scheduled_start_utc && selected.kickoffs.has(fixtureTimeKey(r.next_match_scheduled_start_utc)))) &&
-        (!roleSearch || `${r.position || ""} ${r.tactical_role || ""}`.toLowerCase().includes(roleSearch)) &&
-        (!teamSearch || (r.team_name || "").toLowerCase().includes(teamSearch)),
+        (!startersOnly || Boolean(r.started)) &&
+        (!matchNextSide || (r.next_match_side && r.team_side === (r.next_match_side === "H" ? "home" : "away"))) &&
+        (!includeContext || !roleSearch || `${r.position || ""} ${r.tactical_role || ""}`.toLowerCase().includes(roleSearch)) &&
+        (!includeContext || !teamSearch || (r.team_name || "").toLowerCase().includes(teamSearch)),
     );
+  }
+
+  function aggregateRows() {
+    const gameCount = Number(sampleValue.match(/\d+/)?.[0] || maximumRecentGames);
+    const groups = new Map();
+    for (const appearance of filteredRows("", false)) {
+      const key = `${appearance.source}|${appearance.source_player_id}|${appearance.source_team_id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(appearance);
+    }
+    const aggregated = [];
+    for (const group of groups.values()) {
+      group.sort((a, b) =>
+        new Date(b.match_date) - new Date(a.match_date) ||
+        Number(b.source_match_id) - Number(a.source_match_id),
+      );
+      const sample = group.slice(0, gameCount);
+      const latest = sample[0];
+      const result = {
+        ...latest,
+        window_type: sampleValue,
+        venue_scope: matchNextSide ? (latest.next_match_side === "H" ? "home" : "away") : "all",
+        matches: sample.length,
+        starts: sample.filter((r) => Boolean(r.started)).length,
+        minutes: sample.reduce((sum, r) => sum + Number(r.minutes_played || 0), 0),
+      };
+      for (const metric of Object.keys(data.metrics)) {
+        result[metric] = sample.reduce((sum, r) => sum + Number(r[metric] || 0), 0);
+      }
+      const roleSearch = position.value.trim().toLowerCase();
+      const teamSearch = team.value.trim().toLowerCase();
+      if (
+        (!roleSearch || `${result.position || ""} ${result.tactical_role || ""}`.toLowerCase().includes(roleSearch)) &&
+        (!teamSearch || (result.team_name || "").toLowerCase().includes(teamSearch))
+      ) aggregated.push(result);
+    }
+    return aggregated;
   }
 
   function renderFilters() {
@@ -619,7 +657,7 @@ async function rankings(data) {
       const allValues = new Map(available);
       for (const value of selectedValues) {
         if (allValues.has(value)) continue;
-        const fallback = rows.find((r) => valueOf(r) === value);
+        const fallback = appearances.find((r) => valueOf(r) === value);
         if (fallback) allValues.set(value, labelOf(fallback));
       }
       const track = controls.querySelector(`[data-slicer="${key}"] .rank-slicer-options`);
@@ -669,31 +707,17 @@ async function rankings(data) {
   }
 
   async function load() {
-    const scopes = matchNextSide ? ["home", "away"] : ["all"];
-    const suffix = startersOnly ? "-starters" : "";
-    const key = `${sampleValue}-${scopes.join("+")}-${startersOnly}`;
-    if (!cache.has(key)) {
-      cache.set(
-        key,
-        (await Promise.all(
-          scopes.map((scope) =>
-            get(`${root}data/rankings/all-${sampleValue}-${scope}${suffix}.json`),
-          ),
-        )).flat(),
-      );
-    }
-    rows = cache.get(key);
+    if (!appearances.length)
+      appearances = await get(`${root}data/rankings/player-matches.json`);
     limit = 50;
     render();
   }
 
   function render() {
     renderFilters();
-    const filtered = filteredRows().filter(
+    const filtered = aggregateRows().filter(
       (r) =>
         r.window_type === sampleValue &&
-        r.venue_scope === (matchNextSide ? (r.next_match_side === "H" ? "home" : "away") : "all") &&
-        (!matchNextSide || Boolean(r.next_match_side)) &&
         Number(r.minutes) >= Number(minutes.value || 0) &&
         Number(r.starts) >= Number(starts.value || 0),
     );
@@ -809,6 +833,20 @@ async function rankings(data) {
       else render();
     }
   });
+  content.addEventListener("click", (event) => {
+    const sortButton = event.target.closest("button[data-grid-sort]");
+    if (!sortButton) return;
+    const key = sortButton.dataset.gridSort;
+    const index = Number(sortButton.dataset.gridSortIndex || 0);
+    if (gridSortKey === key && (key !== "match" || gridSortMatchIndex === index)) {
+      gridSortDirection *= -1;
+    } else {
+      gridSortKey = key;
+      gridSortMatchIndex = index;
+      gridSortDirection = key === "match" ? -1 : 1;
+    }
+    render();
+  });
   matchSideToggle.addEventListener("click", () => {
     matchNextSide = !matchNextSide;
     syncUrl();
@@ -828,16 +866,15 @@ async function rankings(data) {
 async function match(data) {
   const f = data.fixture;
 
-  const shortManager = (name) => {
-    if (!name) return "";
-    const words = name.trim().split(/\s+/);
-    return words.length > 1 ? `${words[0][0]}. ${words.slice(1).join(" ")}` : name;
-  };
   const resultCode = (value) =>
     ({ win: "W", draw: "D", loss: "L" })[value] || value || "—";
-  const form = (rows) => rows.slice(0, 5).map((r, index) =>
-    `<span class="form-tile ${esc(resultCode(r.result))}${index === 0 ? " latest-form" : ""}" title="${esc(r.historical_opponent_name)}">${esc(resultCode(r.result))}</span>`,
-  ).join("");
+  const form = (rows) => {
+    const tiles = rows.slice(0, 5).map((r, index) =>
+      `<span class="form-tile ${esc(resultCode(r.result))}${index === 0 ? " latest-form" : ""}" title="${esc(r.historical_opponent_name)}">${esc(resultCode(r.result))}</span>`,
+    );
+    while (tiles.length < 5) tiles.push('<span class="form-tile form-tile-empty" aria-hidden="true"></span>');
+    return tiles.join("");
+  };
   const teamNames = new Map([
     [String(f.home_team_id), f.home_team],
     [String(f.away_team_id), f.away_team],
@@ -847,9 +884,11 @@ async function match(data) {
   let statValue = params.get("stat") || "shots";
   let gameCount = Number(params.get("games") || 10);
   let sideFilterOn = (params.get("venue") || "all") !== "all";
+  let gridSortKey = "match";
+  let gridSortMatchIndex = 0;
+  let gridSortDirection = -1;
   const formatFormation = (value) => {
-    const digits = String(value || "").replaceAll("-", "");
-    return /^\d+$/.test(digits) ? [...digits].join("-") : value;
+    return String(value || "").replaceAll("-", "");
   };
   const icon = (file, label, cls = "metadata-icon") =>
     `<img class="${cls}" src="${root}assets/images/icons/${file}.png" alt="" title="${esc(label)}">`;
@@ -917,7 +956,7 @@ async function match(data) {
       const venue = i === 0 ? "home" : "away";
       const sideRows = rows.filter((r) => r.historical_team_side === venue);
       return `<section class="team-meta ${i === 0 ? "team-meta-home" : "team-meta-away"}">
-        <div class="meta-line">${managerName ? `<span class="meta-item">${icon("manager_icon", "Manager")}<span title="${esc(managerName)}">${esc(shortManager(managerName))}</span></span>` : ""}${formationName ? `<span class="meta-item">${icon("formation_icon", "Formation")}<span>${esc(formatFormation(formationName))}</span></span>` : ""}</div>
+        <div class="meta-line">${managerName ? `<span class="meta-item">${icon("manager_icon", "Manager")}<span title="${esc(managerName)}">${esc(managerName)}</span></span>` : ""}${formationName ? `<span class="meta-item">${icon("formation_icon", "Formation")}<span>${esc(formatFormation(formationName))}</span></span>` : ""}</div>
         <div class="form-line"><small>Recent</small>${form(rows)}</div>
         <div class="form-line"><small>${i === 0 ? "Home" : "Away"}</small>${form(sideRows)}</div>
       </section>`;
@@ -936,10 +975,17 @@ async function match(data) {
     competitionOptions.innerHTML = `<button type="button" data-match-competition="all">All</button>${[...available].sort((a, b) => a[1].localeCompare(b[1])).map(([id, label]) => `<button type="button" data-match-competition="${esc(id)}">${esc(label)}</button>`).join("")}`;
   }
   function render() {
+    const previousScrollLeft = content.querySelector(".match-table-scroll")?.scrollLeft || 0;
     const selectedTeamSide = String(teamValue) === String(f.home_team_id) ? "home" : "away";
     const matches = teamHistory(teamValue)
       .filter((r) => !sideFilterOn || r.historical_team_side === selectedTeamSide)
       .slice(0, gameCount);
+    const selectedMatchIndex = matches.length
+      ? Math.min(gridSortMatchIndex, matches.length - 1)
+      : 0;
+    const sortArrow = (active) => active
+      ? `<span class="grid-sort-arrow">${gridSortDirection < 0 ? "↓" : "↑"}</span>`
+      : "";
     const playerHistory = data.players
       .filter((r) => String(r.source_team_id) === String(teamValue))
       .sort((a, b) => Number(b.matches_ago) - Number(a.matches_ago));
@@ -958,13 +1004,14 @@ async function match(data) {
       ? "—" : `${r.historical_score_for}–${r.historical_score_against}`;
     const competitionHeaders = matches.map((r) => `<th class="history-column">${historyEntity("competitions", r.historical_competition_id, r.historical_competition_name)}</th>`).join("");
     const dateHeaders = matches.map((r) => `<th class="history-column"><time>${shortDate(r.historical_match_date)}</time></th>`).join("");
-    const opponentHeaders = matches.map((r) => {
+    const opponentHeaders = matches.map((r, index) => {
       const side = r.historical_team_side === "home" ? "H" : "A";
       const result = resultCode(r.result);
-      return `<th class="history-column"><div class="history-header" title="${esc(r.historical_competition_name)} · ${esc(r.historical_opponent_name)} · ${side}">
+      const sorted = gridSortKey === "match" && selectedMatchIndex === index;
+      return `<th class="history-column${sorted ? " sorted-column" : ""}" aria-sort="${sorted ? (gridSortDirection < 0 ? "descending" : "ascending") : "none"}"><button type="button" class="history-header" data-grid-sort="match" data-grid-sort-index="${index}" title="Sort players by ${esc(statValue)} in this match · ${esc(r.historical_opponent_name)} · ${side}">
         <span class="history-opponent">${image("teams", r.historical_opponent_id, r.historical_opponent_name, "match-history-badge history-opponent-logo") || `<span class="history-opponent-fallback">${esc(r.historical_opponent_name)}</span>`}</span>
-        <span class="history-venue ${side.toLowerCase()}">(${side})</span><span class="history-score ${esc(result)}">${score(r)}</span>
-      </div></th>`;
+        <span class="history-venue ${side.toLowerCase()}">(${side})</span><span class="history-score ${esc(result)}">${score(r)}</span>${sortArrow(sorted)}
+      </button></th>`;
     }).join("");
     const eventMarks = (r) => [
       Number(r.goals || 0) > 0 ? `<span class="event-mark goal-mark" title="${r.goals} goal${r.goals === 1 ? "" : "s"}">⚽${r.goals > 1 ? esc(r.goals) : ""}</span>` : "",
@@ -973,7 +1020,43 @@ async function match(data) {
       Number(r.second_yellow_cards || 0) > 0 ? `<span class="event-mark yellow-mark" title="${r.second_yellow_cards} second yellow card${r.second_yellow_cards === 1 ? "" : "s"}">2Y${r.second_yellow_cards > 1 ? esc(r.second_yellow_cards) : ""}</span>` : "",
       Number(r.red_cards || 0) > 0 ? `<span class="event-mark red-mark" title="${r.red_cards} red card${r.red_cards === 1 ? "" : "s"}">R${r.red_cards > 1 ? esc(r.red_cards) : ""}</span>` : "",
     ].join("");
-    const playerRows = [...players.values()].sort((a, b) => (a.player_display_name || a.player_name).localeCompare(b.player_display_name || b.player_name)).map((p) => {
+    const nameParts = (player) => String(player.player_name || player.player_display_name || "")
+      .trim().split(/\s+/).filter(Boolean);
+    const comparePlayerNames = (a, b) => {
+      const aParts = nameParts(a);
+      const bParts = nameParts(b);
+      const surnameOrder = (aParts.at(-1) || "").localeCompare(
+        bParts.at(-1) || "", undefined, { sensitivity: "base" },
+      );
+      return surnameOrder || aParts.slice(0, -1).join(" ").localeCompare(
+        bParts.slice(0, -1).join(" "), undefined, { sensitivity: "base" },
+      );
+    };
+    const compareNullable = (left, right) => {
+      if (left == null && right == null) return 0;
+      if (left == null) return 1;
+      if (right == null) return -1;
+      return (left - right) * gridSortDirection;
+    };
+    const orderedPlayers = [...players.values()].sort((a, b) => {
+      let comparison = 0;
+      if (gridSortKey === "number") {
+        comparison = compareNullable(
+          shirtNumbers.get(a.source_player_id), shirtNumbers.get(b.source_player_id),
+        );
+      } else if (gridSortKey === "player") {
+        comparison = gridSortDirection * comparePlayerNames(a, b);
+      } else if (matches.length) {
+        const matchId = matches[selectedMatchIndex].historical_match_id;
+        const aCell = cells.get(`${a.source_player_id}|${matchId}`);
+        const bCell = cells.get(`${b.source_player_id}|${matchId}`);
+        const aValue = Number(aCell?.seconds_played) > 0 ? Number(aCell?.[statValue] || 0) : null;
+        const bValue = Number(bCell?.seconds_played) > 0 ? Number(bCell?.[statValue] || 0) : null;
+        comparison = compareNullable(aValue, bValue);
+      }
+      return comparison || comparePlayerNames(a, b);
+    });
+    const playerRows = orderedPlayers.map((p) => {
       const matchCells = matches.map((m) => {
         const r = cells.get(`${p.source_player_id}|${m.historical_match_id}`);
         if (!r) return '<td class="match-cell"></td>';
@@ -1004,8 +1087,10 @@ async function match(data) {
     sideButton.textContent = sideFilterOn ? (selectedTeamSide === "home" ? "Home" : "Away") : "Any";
     sideButton.classList.toggle("active", sideFilterOn);
     sideButton.setAttribute("aria-pressed", String(sideFilterOn));
+    const numberSort = gridSortKey === "number";
+    const playerSort = gridSortKey === "player";
     content.innerHTML = matches.length
-      ? `<div class="match-grid-stack"><div class="history-meta-scroll"><table class="history-meta-grid" aria-hidden="true"><tbody><tr><td class="shirt-column"></td><td class="player-column"></td>${competitionHeaders}</tr><tr><td class="shirt-column"></td><td class="player-column"></td>${dateHeaders}</tr></tbody></table></div><div class="scroll match-table-scroll"><table class="match-grid"><thead><tr><th class="shirt-column">#</th><th class="player-column">Player</th>${opponentHeaders}</tr></thead><tbody>${playerRows}</tbody></table></div></div>`
+      ? `<div class="match-grid-stack"><div class="history-meta-scroll"><table class="history-meta-grid" aria-hidden="true"><tbody><tr><td class="shirt-column"></td><td class="player-column"></td>${competitionHeaders}</tr><tr><td class="shirt-column"></td><td class="player-column"></td>${dateHeaders}</tr></tbody></table></div><div class="scroll match-table-scroll"><table class="match-grid"><thead><tr><th class="shirt-column${numberSort ? " sorted-column" : ""}" aria-sort="${numberSort ? (gridSortDirection < 0 ? "descending" : "ascending") : "none"}"><button type="button" class="grid-text-sort" data-grid-sort="number">#${sortArrow(numberSort)}</button></th><th class="player-column${playerSort ? " sorted-column" : ""}" aria-sort="${playerSort ? (gridSortDirection < 0 ? "descending" : "ascending") : "none"}"><button type="button" class="grid-text-sort" data-grid-sort="player">Player${sortArrow(playerSort)}</button></th>${opponentHeaders}</tr></thead><tbody>${playerRows}</tbody></table></div></div>`
       : empty();
     const metaScroll = content.querySelector(".history-meta-scroll");
     const tableScroll = content.querySelector(".match-table-scroll");
@@ -1019,6 +1104,8 @@ async function match(data) {
       };
       metaScroll.addEventListener("scroll", () => syncScroll(metaScroll, tableScroll), { passive: true });
       tableScroll.addEventListener("scroll", () => syncScroll(tableScroll, metaScroll), { passive: true });
+      tableScroll.scrollLeft = previousScrollLeft;
+      metaScroll.scrollLeft = previousScrollLeft;
     }
     syncMatchUrl();
   }
@@ -1029,6 +1116,9 @@ async function match(data) {
     if (teamButton) {
       teamValue = teamButton.dataset.matchTeam;
       competitionValue = "all";
+      gridSortKey = "match";
+      gridSortMatchIndex = 0;
+      gridSortDirection = -1;
       renderCompetitionOptions();
       render();
     } else if (compButton) {
@@ -1036,8 +1126,25 @@ async function match(data) {
       render();
     } else if (sideButton) {
       sideFilterOn = !sideFilterOn;
+      gridSortKey = "match";
+      gridSortMatchIndex = 0;
+      gridSortDirection = -1;
       render();
     }
+  });
+  content.addEventListener("click", (event) => {
+    const sortButton = event.target.closest("button[data-grid-sort]");
+    if (!sortButton) return;
+    const key = sortButton.dataset.gridSort;
+    const index = Number(sortButton.dataset.gridSortIndex || 0);
+    if (gridSortKey === key && (key !== "match" || gridSortMatchIndex === index)) {
+      gridSortDirection *= -1;
+    } else {
+      gridSortKey = key;
+      gridSortMatchIndex = index;
+      gridSortDirection = key === "match" ? -1 : 1;
+    }
+    render();
   });
   stat.addEventListener("change", () => {
     statValue = stat.value;
