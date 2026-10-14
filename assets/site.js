@@ -8,9 +8,11 @@ const params = new URLSearchParams(location.search);
 
 const image = (category, id, alt, cls = "entity-logo") => {
   const available = window.siteImages?.[category] || [];
+  const svgAvailable = window.siteSvgImages?.[category] || [];
   const key = String(id ?? "");
-  const src = available.includes(key)
-    ? `${root}assets/images/${category}/${encodeURIComponent(key)}.png`
+  const extension = svgAvailable.includes(key) ? "svg" : available.includes(key) ? "png" : "";
+  const src = extension
+    ? `${root}assets/images/${category}/${encodeURIComponent(key)}.${extension}`
     : category === "teams" ? `${root}assets/images/teams/unknown_light.png`
       : category === "competitions" ? `${root}assets/images/competitions/unknown_light.png` : "";
   return src ? `<img class="${cls}" src="${src}" alt="" title="${esc(alt)}">` : "";
@@ -55,6 +57,22 @@ const date = (v) =>
         hour12: true,
       })
     : "Kickoff pending";
+
+const fixtureDayLabel = (v) =>
+  v
+    ? new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : "Kickoff pending";
+
+const fixtureKickoffLabel = (v) =>
+  v
+    ? new Date(v)
+        .toLocaleTimeString(undefined, {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })
+        .replace(/\s/g, "")
+    : "";
 
 const fixtureDateKey = (value) => {
   const d = new Date(value);
@@ -195,10 +213,12 @@ function fixtureGroups(fixtures, grouping) {
         : date(first.scheduled_start_utc);
       return `<section class="fixture-group"><h2>${esc(heading)}</h2><div class="fixture-group-rows">${group
         .map((f) => {
+          const dayLabel = fixtureDayLabel(f.scheduled_start_utc);
+          const timeLabel = fixtureKickoffLabel(f.scheduled_start_utc);
           const context = byCompetition
-            ? esc(date(f.scheduled_start_utc))
+            ? `<span class="fixture-date">${esc(dayLabel)}</span>${timeLabel ? `<span class="fixture-kickoff">${esc(timeLabel)}</span>` : ""}`
             : competitionMark(f);
-          return `<a class="fixture-row" href="${root}${esc(f.page)}" aria-label="Analyse ${esc(f.home_team)} versus ${esc(f.away_team)}">
+          return `<a class="fixture-row group-${grouping}" href="${root}${esc(f.page)}" aria-label="Analyse ${esc(f.home_team)} versus ${esc(f.away_team)}">
         <span class="fixture-context">${context}</span>
         <span class="fixture-home"><span>${esc(f.home_team)}</span>${image("teams", f.home_team_id, f.home_team)}</span>
         <span class="fixture-versus">v</span>
@@ -216,6 +236,7 @@ function fixtureGroups(fixtures, grouping) {
 async function start() {
   const data = await get(body.dataset.payload);
   window.siteImages = data.images || {};
+  window.siteSvgImages = data.svg_images || {};
 
   if (body.dataset.kind === "home") {
     summary.innerHTML = `<div class="shortcuts"><a href="${root}players/index.html?stat=shots&mode=per95">Shots / 95 →</a><a href="${root}players/index.html?stat=tackles&mode=per95">Tackles / 95 →</a><a href="${root}players/index.html?stat=fouls_drawn&mode=per95">Fouls drawn / 95 →</a></div>`;

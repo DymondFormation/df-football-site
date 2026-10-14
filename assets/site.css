@@ -1043,6 +1043,14 @@ body[data-kind="players"] .controls {
   font-size: clamp(11px, 1.2vw, 14px);
   border-bottom: 1px solid var(--border);
 }
+.fixture-row.group-kickoff {
+  padding-left: 56px;
+  padding-right: 56px;
+}
+.fixture-row.group-competition {
+  padding-left: 72px;
+  padding-right: 72px;
+}
 .fixture-row:last-child {
   border-bottom: 0;
 }
@@ -1063,6 +1071,16 @@ body[data-kind="players"] .controls {
   white-space: nowrap;
   color: var(--muted);
   font-size: 12px;
+}
+.fixture-row.group-competition .fixture-context {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  width: 58px;
+  font-size: 10px;
+  line-height: 1.1;
 }
 .fixture-home,
 .fixture-away {
@@ -1345,6 +1363,19 @@ body[data-kind="players"] .rank-settings-line {
     gap: 5px;
     padding: 8px clamp(72px, 20vw, 96px);
     font-size: clamp(10px, 3vw, 12px);
+  }
+  .fixture-row.group-kickoff {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+  .fixture-row.group-competition {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+  .fixture-row.group-competition .fixture-context {
+    width: 38px;
+    max-width: 38px;
+    font-size: 9px;
   }
   .fixture-context {
     font-size: 10px;
