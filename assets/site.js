@@ -467,6 +467,7 @@ async function rankings(data) {
   const savedWindow = params.get("window") || "last_5";
   const savedMode = params.get("mode") || "per95";
   let matchNextSide = params.get("match_side") === "1";
+  let lastXIOnly = params.get("last_xi") === "1";
   let startersOnly = params.get("starters") === "1";
   const maximumRecentGames = Math.max(1, Number(data.recent_games) || 10);
   const selected = {
@@ -478,6 +479,7 @@ async function rankings(data) {
   let sampleValue = savedWindow,
     modeValue = ["total", "per95"].includes(savedMode) ? savedMode : "per95",
     appearances = [],
+    lastXIPlayers = new Set(),
     limit = 50,
     sortKey = "metric",
     sortDirection = -1;
@@ -528,7 +530,7 @@ async function rankings(data) {
       <div class="rank-settings-line">
         <span class="slicer-icon rank-settings-icon" title="Statistics" aria-label="Statistics" role="img">${icons.statistics}</span>
         <div class="rank-settings-row rank-settings-primary">
-          <label class="rank-control rank-stat">Metric<select id="stat">${Object.entries(data.metrics).map(([key, name]) => `<option value="${esc(key)}">${esc(name)}</option>`).join("")}</select></label>
+          <label class="rank-control rank-stat"><span>Metric</span><select id="stat">${Object.entries(data.metrics).map(([key, name]) => `<option value="${esc(key)}">${esc(name)}</option>`).join("")}</select></label>
           <div class="rank-control"><span>Maximum Matches</span><div class="rank-choice" data-choice-group="window" role="group" aria-label="Maximum Matches"></div></div>
           <div class="rank-control"><span>View</span><div class="rank-choice" data-choice-group="mode" role="group" aria-label="View"></div></div>
           <div class="rank-control"><span>Next side</span><button class="rank-toggle" id="match-side-toggle" type="button" aria-pressed="false">Off</button></div>
@@ -537,11 +539,12 @@ async function rankings(data) {
       <div class="rank-settings-line">
         <span class="slicer-icon rank-settings-icon" title="Player context" aria-label="Player context" role="img">${icons.player}</span>
         <div class="rank-settings-row rank-settings-context">
+          <div class="rank-control rank-last-xi"><span>Last XI</span><button class="rank-toggle rank-toggle-last-xi" id="last-xi-toggle" type="button" aria-pressed="false">Off</button></div>
           <div class="rank-control rank-starter"><span>Starter</span><button class="rank-toggle rank-toggle-starter" id="starter-toggle" type="button" aria-pressed="false">Off</button></div>
-          <label class="rank-control rank-number">Mins+<input id="minutes" type="number" min="0" value="${esc(params.get("minutes") || "90")}" inputmode="numeric"></label>
-          <label class="rank-control rank-number rank-starts">Starts+<input id="starts" type="number" min="0" value="${esc(params.get("starts") || "0")}" inputmode="numeric"></label>
-          <label class="rank-control rank-search">Team<input id="team" type="search" value="${esc(params.get("team") || "")}" placeholder="Team"></label>
-          <label class="rank-control rank-position">Pos<input id="position" type="search" maxlength="3" value="${esc(params.get("position") || params.get("role") || "")}" placeholder="Any" autocomplete="off"></label>
+          <label class="rank-control rank-number rank-starts"><span>Starts+</span><input id="starts" type="number" min="0" value="${esc(params.get("starts") || "0")}" inputmode="numeric"></label>
+          <label class="rank-control rank-number"><span>Mins+</span><input id="minutes" type="number" min="0" value="${esc(params.get("minutes") || "90")}" inputmode="numeric"></label>
+          <label class="rank-control rank-search"><span>Team</span><input id="team" type="search" value="${esc(params.get("team") || "")}" placeholder="Team"></label>
+          <label class="rank-control rank-position"><span>Pos</span><input id="position" type="search" maxlength="3" value="${esc(params.get("position") || params.get("role") || "")}" placeholder="Any" autocomplete="off"></label>
         </div>
       </div>
     </div>`;
@@ -561,6 +564,7 @@ async function rankings(data) {
   const team = controls.querySelector("#team");
   const position = controls.querySelector("#position");
   const matchSideToggle = controls.querySelector("#match-side-toggle");
+  const lastXIToggle = controls.querySelector("#last-xi-toggle");
   const starterToggle = controls.querySelector("#starter-toggle");
   stat.value = params.get("stat") || "shots";
 
@@ -579,6 +583,8 @@ async function rankings(data) {
     params.delete("venue");
     if (matchNextSide) params.set("match_side", "1");
     else params.delete("match_side");
+    if (lastXIOnly) params.set("last_xi", "1");
+    else params.delete("last_xi");
     if (startersOnly) params.set("starters", "1");
     else params.delete("starters");
     for (const [key, value] of [
@@ -624,12 +630,15 @@ async function rankings(data) {
         new Date(b.match_date) - new Date(a.match_date) ||
         Number(b.source_match_id) - Number(a.source_match_id),
       );
+      const latest = group[0];
+      const key = `${latest.source}|${latest.source_player_id}|${latest.source_team_id}`;
+      if (lastXIOnly && !lastXIPlayers.has(key)) continue;
       const sample = group.slice(0, gameCount);
-      const latest = sample[0];
+      const sampleLatest = sample[0];
       const result = {
-        ...latest,
+        ...sampleLatest,
         window_type: sampleValue,
-        venue_scope: matchNextSide ? (latest.next_match_side === "H" ? "home" : "away") : "all",
+        venue_scope: matchNextSide ? (sampleLatest.next_match_side === "H" ? "home" : "away") : "all",
         matches: sample.length,
         starts: sample.filter((r) => Boolean(r.started)).length,
         minutes: sample.reduce((sum, r) => sum + Number(r.minutes_played || 0), 0),
@@ -720,7 +729,11 @@ async function rankings(data) {
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", String(active));
     }
-    for (const [toggle, active] of [[matchSideToggle, matchNextSide], [starterToggle, startersOnly]]) {
+    for (const [toggle, active] of [
+      [matchSideToggle, matchNextSide],
+      [lastXIToggle, lastXIOnly],
+      [starterToggle, startersOnly],
+    ]) {
       toggle.classList.toggle("active", active);
       toggle.setAttribute("aria-pressed", String(active));
       toggle.textContent = active ? "On" : "Off";
@@ -728,8 +741,31 @@ async function rankings(data) {
   }
 
   async function load() {
-    if (!appearances.length)
+    if (!appearances.length) {
       appearances = await get(`${root}data/rankings/player-matches.json`);
+      const latestMatchByTeam = new Map();
+      for (const appearance of appearances) {
+        const teamKey = `${appearance.source}|${appearance.source_team_id}`;
+        const matchKey = `${appearance.source}|${appearance.source_match_id}`;
+        const current = latestMatchByTeam.get(teamKey);
+        const date = new Date(appearance.match_date).getTime();
+        const currentDate = current ? new Date(current.match_date).getTime() : -Infinity;
+        if (
+          !current ||
+          date > currentDate ||
+          (date === currentDate && Number(appearance.source_match_id) > Number(current.source_match_id))
+        ) latestMatchByTeam.set(teamKey, { matchKey, match_date: appearance.match_date, source_match_id: appearance.source_match_id });
+      }
+      lastXIPlayers = new Set(
+        appearances
+          .filter((appearance) => {
+            const teamKey = `${appearance.source}|${appearance.source_team_id}`;
+            const matchKey = `${appearance.source}|${appearance.source_match_id}`;
+            return appearance.started && latestMatchByTeam.get(teamKey)?.matchKey === matchKey;
+          })
+          .map((appearance) => `${appearance.source}|${appearance.source_player_id}|${appearance.source_team_id}`),
+      );
+    }
     limit = 50;
     render();
   }
@@ -872,6 +908,11 @@ async function rankings(data) {
     matchNextSide = !matchNextSide;
     syncUrl();
     load().catch(showError);
+  });
+  lastXIToggle.addEventListener("click", () => {
+    lastXIOnly = !lastXIOnly;
+    syncUrl();
+    render();
   });
   starterToggle.addEventListener("click", () => {
     startersOnly = !startersOnly;

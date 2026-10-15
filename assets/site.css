@@ -787,6 +787,13 @@ body[data-kind="players"] .controls {
   text-align: center;
   white-space: nowrap;
 }
+.rank-control > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.15em;
+  line-height: 1.15;
+}
 .rank-control select,
 .rank-control input {
   width: 100%;
@@ -845,6 +852,16 @@ body[data-kind="players"] .controls {
   min-height: 29px;
   height: 29px;
 }
+.rank-settings-context .rank-control > button {
+  width: 100%;
+  min-height: 29px;
+  height: 29px;
+}
+.rank-settings-primary .rank-choice {
+  height: 29px;
+  padding: 1px 2px;
+  align-items: center;
+}
 .rank-toggle.active {
   border-color: var(--accent);
   background: #2a3b32;
@@ -852,6 +869,9 @@ body[data-kind="players"] .controls {
 }
 .rank-starter {
   width: 44px;
+}
+.rank-last-xi {
+  width: 48px;
 }
 .next-opponent {
   color: var(--accent);
@@ -1231,7 +1251,7 @@ body[data-kind="players"] .rank-settings-line {
   }
   .rank-settings-context {
     display: grid;
-    grid-template-columns: 36px 36px 32px 82px 52px;
+    grid-template-columns: 36px 36px 32px 36px minmax(56px, 82px) 48px;
     gap: 4px;
   }
   .rank-control {
@@ -1272,6 +1292,13 @@ body[data-kind="players"] .rank-settings-line {
     padding: 3px;
     font-size: 9px;
   }
+  .rank-settings-primary .rank-choice {
+    height: 27px;
+  }
+  .rank-settings-primary .rank-choice-button {
+    min-height: 23px;
+    height: 23px;
+  }
   .rank-toggle {
     width: 34px;
     min-height: 28px;
@@ -1283,8 +1310,18 @@ body[data-kind="players"] .rank-settings-line {
     min-height: 27px;
     height: 27px;
   }
+  .rank-settings-context .rank-control > button {
+    min-height: 27px;
+    height: 27px;
+  }
   .rank-starter {
     width: 36px;
+  }
+  .rank-last-xi {
+    width: 36px;
+  }
+  .rank-search {
+    width: auto;
   }
   .fixture-slicer {
     grid-template-columns: 18px minmax(0, 1fr) 22px;
