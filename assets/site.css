@@ -867,6 +867,12 @@ body[data-kind="players"] .controls {
   background: #2a3b32;
   color: var(--accent);
 }
+#rank-sub-on-toggle.active,
+.match-sub-on-toggle.active {
+  border-color: #f6d982;
+  background: #3a382c;
+  color: #f6d982;
+}
 .rank-starter {
   width: 44px;
 }
@@ -1064,8 +1070,8 @@ body[data-kind="players"] .controls {
   border-bottom: 1px solid var(--border);
 }
 .fixture-row.group-kickoff {
-  padding-left: 56px;
-  padding-right: 56px;
+  padding-left: 52px;
+  padding-right: 52px;
 }
 .fixture-row.group-competition {
   padding-left: 72px;
@@ -1246,7 +1252,7 @@ body[data-kind="players"] .rank-settings-line {
   }
   .rank-settings-primary {
     display: grid;
-    grid-template-columns: 70px max-content max-content max-content;
+    grid-template-columns: 70px max-content max-content max-content max-content;
     justify-content: start;
   }
   .rank-settings-context {
@@ -1402,8 +1408,8 @@ body[data-kind="players"] .rank-settings-line {
     font-size: clamp(10px, 3vw, 12px);
   }
   .fixture-row.group-kickoff {
-    padding-left: 48px;
-    padding-right: 48px;
+    padding-left: 44px;
+    padding-right: 36px;
   }
   .fixture-row.group-competition {
     padding-left: 48px;
@@ -1452,16 +1458,18 @@ body[data-kind="players"] .rank-settings-line {
 }
 
 body[data-kind="players"] .ranking-table {
-  width: 100%;
+  width: max-content;
   min-width: 400px;
   table-layout: fixed;
   font-size: 12px;
 }
-.ranking-table .rank-col-player { width: 26%; }
-.ranking-table .rank-col-info { width: auto; }
-.ranking-table .rank-col-metric { width: 64px; }
+.ranking-table .rank-col-player { width: clamp(95px, 21vw, 190px); }
+.ranking-table .rank-col-info { width: clamp(112px, 28vw, 260px); }
+.ranking-table .rank-col-metric { width: 54px; }
+.ranking-table .rank-col-subon { width: 68px; }
 .ranking-table .rank-col-minutes { width: 48px; }
 .ranking-table .rank-col-apps { width: 58px; }
+.ranking-table.sub-on-visible { min-width: 454px; }
 .ranking-table th,
 .ranking-table td {
   padding: 4px 5px;
@@ -1504,6 +1512,13 @@ body[data-kind="players"] .ranking-table {
   align-items: center;
   gap: 4px;
 }
+.rank-player-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
 .rank-player-name,
 .rank-info-name {
   min-width: 0;
@@ -1515,10 +1530,24 @@ body[data-kind="players"] .ranking-table {
 .rank-metric {
   font-size: clamp(11px, 1vw, 14px);
 }
+.rank-player-position {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.1;
+}
 .rank-metric {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.rank-subon-content {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px;
+  max-width: 100%;
+}
+.rank-subon-starter { font-weight: 600; }
+.rank-subon-substitute { color: #f6d982; font-size: 8px; }
 .ranking-table td:nth-child(n + 3) {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1554,11 +1583,6 @@ body[data-kind="players"] .ranking-table {
 .rank-info-name {
   color: var(--text);
   font-size: 11px;
-}
-.rank-info-position {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 10px;
 }
 .rank-next-match {
   display: inline-flex;
@@ -1599,7 +1623,7 @@ body[data-kind="players"] .ranking-table {
 }
 @media (max-width: 650px) {
   .ranking-table {
-    min-width: 400px;
+    min-width: 100%;
     font-size: 11px;
   }
   .ranking-table th,
@@ -1612,10 +1636,11 @@ body[data-kind="players"] .ranking-table {
   .rank-player-name {
     font-size: 11px;
   }
+  .ranking-table .rank-col-player { width: clamp(95px, 21vw, 135px); }
+  .ranking-table .rank-col-info { width: clamp(112px, 28vw, 180px); }
   .rank-info-name {
     font-size: 10px;
   }
-  .rank-info-position,
   .rank-next-match {
     font-size: 9px;
   }
@@ -1761,6 +1786,18 @@ body[data-kind="match"] #controls {
 .team-meta-home .form-line small { text-align: right; }
 .team-meta-away .form-line small { text-align: left; }
 .match-select-wrap { position: relative; display: block; min-width: 0; }
+.match-select-wrap::after {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--text);
+  border-bottom: 1.5px solid var(--text);
+  content: "";
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
 .match-selected-value {
   position: absolute;
   z-index: 1;
@@ -1775,7 +1812,7 @@ body[data-kind="match"] #controls {
   transform: translateY(-50%);
   pointer-events: none;
 }
-.match-select-wrap select { color: transparent !important; }
+.match-select-wrap select { color: transparent !important; appearance: none; padding-right: 28px; }
 .match-select-wrap select option { color: var(--text); }
 .match-grid {
   --shirt-width: 34px;
@@ -1951,10 +1988,12 @@ body[data-kind="match"] #controls { gap: 7px; }
 .pitch-venue-icon text { fill: currentColor; stroke: none; font: 5px sans-serif; }
 .match-settings { flex-wrap: nowrap; align-items: end; gap: 9px; }
 .match-settings-icon { align-self: center; }
-.match-metric { flex: 0 1 250px; }
+.match-metric { flex: 0 1 190px; }
 .match-control select { width: 100%; max-width: none; min-height: 30px; }
 .match-games-control { flex: 0 0 104px; }
 .match-games-control select { text-align: center; }
+.match-sub-on-control { flex: 0 0 42px; }
+.match-sub-on-toggle { width: 42px; min-height: 30px; height: 30px; }
 .match-title { white-space: nowrap; }
 .match-title-home, .match-title-away { white-space: nowrap; overflow-wrap: normal; }
 .form-tile.latest-form { outline: 1px solid #fff; outline-offset: 1px; }
@@ -2067,6 +2106,53 @@ body[data-kind="match"] #controls { gap: 7px; }
 .match-grid .match-cell { height: 52px; }
 .match-grid .played-cell { width: 100%; height: 52px; padding: 0; }
 .match-grid .played-cell strong { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 16px; }
+.match-grid .played-cell strong.match-stat-starter {
+  grid-area: auto;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
+  line-height: 1;
+  z-index: 1;
+}
+.match-grid .match-stat-substitute {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  z-index: 2;
+  max-width: calc(50% - 10px);
+  overflow: hidden;
+  transform: translateY(-50%);
+  color: #f6d982;
+  font-size: 7px;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+.match-grid .match-stat-substitute { font-weight: 600; }
+.match-grid .sub-on-attribution-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+}
+.match-grid .sub-on-first-sub {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 2;
+  max-width: calc(100% - 28px);
+  overflow: hidden;
+  color: #f6d982;
+  font-size: 6.5px;
+  line-height: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .match-grid .cell-participation { position: absolute; left: 2px; top: 2px; z-index: 1; }
 .match-grid .participation-label { display: grid; min-width: 20px; height: 14px; padding: 0 2px; place-items: center; border: 1px solid var(--border); border-radius: 3px; color: var(--text); background: #2c3b43; font-size: 8px; font-weight: 700; line-height: 1; }
 .match-grid .participation-label.subbed-on { min-width: 24px; font-size: 7px; }
@@ -2159,12 +2245,13 @@ body[data-kind="match"] #controls { gap: 7px; }
 .match-team-toggle { flex: 1 1 auto; }
 .match-team-choice { flex: 1 1 0; }
 .match-team-choice > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.match-metric { flex: 0 1 225px; }
+.match-metric { flex: 0 1 190px; }
 .match-selected-value { font-size: 12px; }
 .match-games-control { flex-basis: 132px; }
 @media (max-width: 650px) {
   .match-metric { flex: 0.9 1 0; }
   .match-games-control { flex-basis: 111px; }
+  .match-sub-on-control { flex-basis: 42px; }
 }
 
 /* Keep both form rows on the same five-match track and expose compact sort controls. */

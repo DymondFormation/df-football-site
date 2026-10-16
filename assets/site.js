@@ -467,6 +467,7 @@ async function rankings(data) {
   const savedWindow = params.get("window") || "last_5";
   const savedMode = params.get("mode") || "per95";
   let matchNextSide = params.get("match_side") === "1";
+  let subOnEnabled = params.get("sub_on") === "1";
   let lastXIOnly = params.get("last_xi") === "1";
   let startersOnly = params.get("starters") === "1";
   const maximumRecentGames = Math.max(1, Number(data.recent_games) || 10);
@@ -534,6 +535,7 @@ async function rankings(data) {
           <div class="rank-control"><span>Maximum Matches</span><div class="rank-choice" data-choice-group="window" role="group" aria-label="Maximum Matches"></div></div>
           <div class="rank-control"><span>View</span><div class="rank-choice" data-choice-group="mode" role="group" aria-label="View"></div></div>
           <div class="rank-control"><span>Next side</span><button class="rank-toggle" id="match-side-toggle" type="button" aria-pressed="false">Off</button></div>
+          <div class="rank-control"><span>SubOn</span><button class="rank-toggle" id="rank-sub-on-toggle" type="button" aria-pressed="false">Off</button></div>
         </div>
       </div>
       <div class="rank-settings-line">
@@ -564,6 +566,7 @@ async function rankings(data) {
   const team = controls.querySelector("#team");
   const position = controls.querySelector("#position");
   const matchSideToggle = controls.querySelector("#match-side-toggle");
+  const rankSubOnToggle = controls.querySelector("#rank-sub-on-toggle");
   const lastXIToggle = controls.querySelector("#last-xi-toggle");
   const starterToggle = controls.querySelector("#starter-toggle");
   stat.value = params.get("stat") || "shots";
@@ -583,6 +586,8 @@ async function rankings(data) {
     params.delete("venue");
     if (matchNextSide) params.set("match_side", "1");
     else params.delete("match_side");
+    if (subOnEnabled) params.set("sub_on", "1");
+    else params.delete("sub_on");
     if (lastXIOnly) params.set("last_xi", "1");
     else params.delete("last_xi");
     if (startersOnly) params.set("starters", "1");
@@ -646,6 +651,28 @@ async function rankings(data) {
       for (const metric of Object.keys(data.metrics)) {
         result[metric] = sample.reduce((sum, r) => sum + Number(r[metric] || 0), 0);
       }
+      result.sub_on_minutes = sample.reduce(
+        (sum, r) => sum + Number(r.sub_on_minutes || 0), 0,
+      );
+      result.sub_on_starter_minutes = sample.reduce(
+        (sum, r) => sum + Number(r.sub_on_starter_minutes || 0), 0,
+      );
+      result.sub_on_substitute_minutes = sample.reduce(
+        (sum, r) => sum + Number(r.sub_on_substitute_minutes || 0), 0,
+      );
+      const startedAppearances = sample.filter((r) => Boolean(r.started));
+      result.starter_stats = Object.fromEntries(
+        Object.keys(data.metrics).map((metric) => [
+          metric,
+          startedAppearances.reduce((sum, r) => sum + Number(r[metric] || 0), 0),
+        ]),
+      );
+      result.sub_on_stats = Object.fromEntries(
+        Object.keys(data.metrics).map((metric) => [
+          metric,
+          sample.reduce((sum, r) => sum + Number(r.sub_on_stats?.[metric] || 0), 0),
+        ]),
+      );
       const roleSearch = position.value.trim().toLowerCase();
       const teamSearch = team.value.trim().toLowerCase();
       if (
@@ -731,6 +758,7 @@ async function rankings(data) {
     }
     for (const [toggle, active] of [
       [matchSideToggle, matchNextSide],
+      [rankSubOnToggle, subOnEnabled],
       [lastXIToggle, lastXIOnly],
       [starterToggle, startersOnly],
     ]) {
@@ -782,13 +810,32 @@ async function rankings(data) {
       modeValue === "total"
         ? Number(r[stat.value] || 0)
         : (Number(r[stat.value] || 0) * (modeValue === "per95" ? 95 : 90)) / Number(r.minutes || 1);
-    const playerName = (r) => r.player_display_name || r.player_name;
+    const subOnValue = (r) => {
+      const total = Number(r.sub_on_stats?.[stat.value] || 0);
+      return modeValue === "total"
+        ? total
+        : (total * (modeValue === "per95" ? 95 : 90)) / Number(r.sub_on_minutes || 1);
+    };
+    const playerName = (r) => subOnEnabled
+      ? r.player_short_display_name || r.player_display_name || r.player_name
+      : r.player_display_name || r.player_name;
+    const subOnParts = (r) => {
+      const scale = modeValue === "per95" ? 95 : 90;
+      const starter = Number(r.starter_stats?.[stat.value] || 0);
+      const substitute = Math.max(0, Number(r.sub_on_stats?.[stat.value] || 0) - starter);
+      if (modeValue === "total") return [starter, substitute];
+      return [
+        (starter * scale) / Number(r.sub_on_starter_minutes || 1),
+        (substitute * scale) / Number(r.sub_on_substitute_minutes || 1),
+      ];
+    };
     const sortValue = (r) => {
       if (sortKey === "player") return playerName(r);
       if (sortKey === "info")
         return `${r.team_name || ""} ${r.position || r.tactical_role || ""} ${r.next_match_opponent_name || ""}`;
       if (sortKey === "minutes") return Number(r.minutes || 0);
       if (sortKey === "apps") return Number(r.matches || 0);
+      if (sortKey === "subon") return subOnValue(r);
       return value(r);
     };
     filtered.sort((a, b) => {
@@ -804,7 +851,7 @@ async function rankings(data) {
       `<button class="rank-sort" type="button" data-rank-sort="${key}" aria-label="Sort by ${esc(label)}" aria-sort="${sortKey === key ? (sortDirection < 0 ? "descending" : "ascending") : "none"}">${esc(label)}${sortKey === key ? ` ${sortDirection < 0 ? "↓" : "↑"}` : ""}</button>`;
     const gameCount = Number(sampleValue.match(/\d+/)?.[0] || data.recent_games);
     content.innerHTML = filtered.length
-      ? `<div class="scroll ranking-scroll"><table class="ranking-table"><colgroup><col class="rank-col-player"><col class="rank-col-info"><col class="rank-col-metric"><col class="rank-col-minutes"><col class="rank-col-apps"></colgroup><thead><tr><th>${sortButton("player", "Player")}</th><th>${sortButton("info", "Info")}</th><th>${sortButton("metric", "Metric")}</th><th>${sortButton("minutes", "Mins")}</th><th>${sortButton("apps", "Apps")}</th></tr></thead><tbody>${filtered
+      ? `<div class="scroll ranking-scroll"><table class="ranking-table${subOnEnabled ? " sub-on-visible" : ""}"><colgroup><col class="rank-col-player"><col class="rank-col-info"><col class="rank-col-metric">${subOnEnabled ? '<col class="rank-col-subon">' : ""}<col class="rank-col-minutes"><col class="rank-col-apps"></colgroup><thead><tr><th>${sortButton("player", "Player")}</th><th>${sortButton("info", "Info")}</th><th>${sortButton("metric", "Metric")}</th>${subOnEnabled ? `<th>${sortButton("subon", "SubOn")}</th>` : ""}<th>${sortButton("minutes", "Mins")}</th><th>${sortButton("apps", "Apps")}</th></tr></thead><tbody>${filtered
           .slice(0, limit)
           .map(
             (r) => {
@@ -816,7 +863,10 @@ async function rankings(data) {
               const matchLink = r.next_match_page
                 ? `<a class="rank-next-match" href="${root}${esc(r.next_match_page)}.html?${matchQuery}" aria-label="Analyse ${esc(r.next_match_opponent_name)} match"><span class="rank-next-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></span><span>vs ${esc(r.next_match_opponent_name)} (${esc(r.next_match_side)})</span></a>`
                 : "";
-              return `<tr><td class="rank-player"><div class="rank-player-cell"><button class="expand" data-detail="${r.detail}" aria-expanded="false" aria-label="Show recent appearances">+</button><span class="rank-player-name" title="${esc(playerName(r))}">${esc(playerName(r))}</span></div></td><td class="rank-info"><div class="rank-info-team">${image("teams", r.source_team_id, r.team_name)}<span class="rank-info-name" title="${esc(r.team_name)}">${esc(r.team_name)}</span><span class="rank-info-position">${esc(r.position || r.tactical_role || "")}</span></div>${matchLink}</td><td class="rank-metric">${value(r).toFixed(modeValue === "total" ? 0 : 2)}</td><td>${Math.round(r.minutes)}</td><td>${r.matches} (${Math.max(0, Number(r.matches || 0) - Number(r.starts || 0))})</td></tr>`;
+              const playerPosition = r.position || r.tactical_role || "";
+              const metricDecimals = modeValue === "total" ? 0 : stat.value === "passes" ? 1 : 2;
+              const [starterSubOn, substituteSubOn] = subOnParts(r);
+              return `<tr><td class="rank-player"><div class="rank-player-cell"><button class="expand" data-detail="${r.detail}" aria-expanded="false" aria-label="Show recent appearances">+</button><span class="rank-player-copy"><span class="rank-player-name" title="${esc(playerName(r))}">${esc(playerName(r))}</span>${playerPosition ? `<span class="rank-player-position">${esc(playerPosition)}</span>` : ""}</span></div></td><td class="rank-info"><div class="rank-info-team">${image("teams", r.source_team_id, r.team_name)}<span class="rank-info-name" title="${esc(r.team_name)}">${esc(r.team_name)}</span></div>${matchLink}</td><td class="rank-metric">${value(r).toFixed(metricDecimals)}</td>${subOnEnabled ? `<td class="rank-subon"><span class="rank-subon-content"><span class="rank-subon-starter">${starterSubOn.toFixed(metricDecimals)}</span><small class="rank-subon-substitute">(${substituteSubOn.toFixed(metricDecimals)})</small></span></td>` : ""}<td>${Math.round(r.minutes)}</td><td>${r.matches} (${Math.max(0, Number(r.matches || 0) - Number(r.starts || 0))})</td></tr>`;
             },
           )
           .join("")}</tbody></table></div>${filtered.length > limit ? '<button id="more">Show 50 more</button>' : ""}`
@@ -828,7 +878,7 @@ async function rankings(data) {
         if (sortKey === nextKey) sortDirection *= -1;
         else {
           sortKey = nextKey;
-          sortDirection = nextKey === "metric" ? -1 : 1;
+          sortDirection = ["metric", "subon"].includes(nextKey) ? -1 : 1;
         }
         render();
         requestAnimationFrame(() => {
@@ -909,6 +959,11 @@ async function rankings(data) {
     syncUrl();
     load().catch(showError);
   });
+  rankSubOnToggle.addEventListener("click", () => {
+    subOnEnabled = !subOnEnabled;
+    syncUrl();
+    render();
+  });
   lastXIToggle.addEventListener("click", () => {
     lastXIOnly = !lastXIOnly;
     syncUrl();
@@ -945,6 +1000,7 @@ async function match(data) {
   let competitionValue = params.get("competition") || "all";
   let statValue = params.get("stat") || "shots";
   let gameCount = Number(params.get("games") || 10);
+  let subOnEnabled = params.get("sub_on") === "1";
   let sideFilterOn = (params.get("venue") || "all") !== "all";
   let gridSortKey = "match";
   let gridSortMatchIndex = 0;
@@ -993,14 +1049,17 @@ async function match(data) {
       <span class="match-control-icon match-settings-icon" title="Statistics" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M6 16l5-5 4 3 6-8m-5 0h5v5"/></svg></span>
       <label class="match-control match-metric"><span class="sr-only">Metric</span><span class="match-select-wrap"><span class="match-selected-value" aria-hidden="true"></span><select id="match-stat" aria-label="Metric">${Object.entries(data.metrics).map(([key, label]) => `<option value="${esc(key)}">${esc(label)}</option>`).join("")}</select></span></label>
       <label class="match-control match-games-control"><span class="sr-only">Matches</span><select id="match-games" aria-label="Matches">${[3, 5, 10, 15, 20, Number(data.recent_games)].filter((n, i, xs) => n > 0 && xs.indexOf(n) === i).sort((a, b) => a - b).map((n) => `<option value="${n}">${n} matches</option>`).join("")}</select></label>
+      <div class="match-control match-sub-on-control"><span>SubOn</span><button type="button" class="rank-toggle match-sub-on-toggle${subOnEnabled ? " active" : ""}" data-match-sub-on aria-pressed="${subOnEnabled}">${subOnEnabled ? "On" : "Off"}</button></div>
     </section>`;
   const stat = controls.querySelector("#match-stat");
   const selectedMetricValue = controls.querySelector(".match-selected-value");
   const competitionOptions = controls.querySelector("#match-competitions");
   stat.value = statValue;
-  selectedMetricValue.textContent = `Metric: ${stat.selectedOptions[0]?.textContent || ""}`;
+  selectedMetricValue.textContent = stat.selectedOptions[0]?.textContent || "";
   const syncMatchUrl = () => {
     for (const [key, value] of [["team", teamValue], ["competition", competitionValue], ["stat", statValue], ["games", gameCount], ["venue", sideFilterOn ? "side" : "all"]]) params.set(key, value);
+    if (subOnEnabled) params.set("sub_on", "1");
+    else params.delete("sub_on");
     history.replaceState(null, "", params.toString() ? `?${params}` : location.pathname);
   };
   const teamHistory = (id) => data.teams
@@ -1058,6 +1117,15 @@ async function match(data) {
         shirtNumbers.set(row.source_player_id, row.shirt_number);
     }
     const cells = new Map(playerHistory.map((r) => [`${r.source_player_id}|${r.historical_match_id}`, r]));
+    const subOnCells = new Map((data.sub_on_players || []).map((r) => [
+      `${r.source_player_id}|${r.historical_match_id}`, r,
+    ]));
+    const cellValue = (row, matchId) => {
+      if (!row) return null;
+      if (!subOnEnabled) return Number(row[statValue] || 0);
+      if (row.started !== true) return 0;
+      return Number(subOnCells.get(`${row.source_player_id}|${matchId}`)?.[statValue] || 0);
+    };
     const shortDate = (value) => {
       const d = new Date(value);
       return `${d.getDate()}/${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -1112,8 +1180,8 @@ async function match(data) {
         const matchId = matches[selectedMatchIndex].historical_match_id;
         const aCell = cells.get(`${a.source_player_id}|${matchId}`);
         const bCell = cells.get(`${b.source_player_id}|${matchId}`);
-        const aValue = Number(aCell?.seconds_played) > 0 ? Number(aCell?.[statValue] || 0) : null;
-        const bValue = Number(bCell?.seconds_played) > 0 ? Number(bCell?.[statValue] || 0) : null;
+        const aValue = Number(aCell?.seconds_played) > 0 ? cellValue(aCell, matchId) : null;
+        const bValue = Number(bCell?.seconds_played) > 0 ? cellValue(bCell, matchId) : null;
         comparison = compareNullable(aValue, bValue);
       }
       return comparison || comparePlayerNames(a, b);
@@ -1126,8 +1194,29 @@ async function match(data) {
         const participation = r.started === true
           ? '<span class="participation-label started" title="Started" aria-label="Started">XI</span>'
           : r.subbed_on === true ? '<span class="participation-label subbed-on" title="Subbed on" aria-label="Subbed on">ON</span>' : "";
-        const value = r[statValue] == null ? 0 : r[statValue];
-        return `<td class="match-cell"><div class="played-cell"><span class="cell-participation">${participation}</span><span class="minute-value">${Math.round(r.minutes_played || 0)}′</span><strong>${esc(value)}</strong><span class="position-badge">${esc(r.match_position || "")}</span><span class="cell-events">${eventMarks(r)}</span></div></td>`;
+        const value = cellValue(r, m.historical_match_id) ?? 0;
+        const subOnRecord = subOnEnabled && r.started === true
+          ? subOnCells.get(`${r.source_player_id}|${m.historical_match_id}`)
+          : null;
+        const starterValue = Number(r[statValue] || 0);
+        const substituteValue = subOnRecord
+          ? Math.max(0, Number(subOnRecord[statValue] || 0) - starterValue)
+          : 0;
+        const substituteMarkup = subOnRecord?.starter_was_substituted === true
+          ? `<span class="match-stat-substitute">(${esc(substituteValue)})</span>`
+          : "";
+        const firstSubName = subOnRecord?.first_sub_short_display_name || "";
+        const valueMarkup = subOnEnabled
+          ? r.started === true
+            ? `<strong class="match-stat-starter">${esc(starterValue)}</strong>${substituteMarkup}`
+            : `<img class="sub-on-attribution-icon" src="${root}assets/images/icons/unused_sub.png" alt="" title="Substitute stats attributed to starter">`
+          : `<strong>${esc(value)}</strong>`;
+        const eventsMarkup = subOnEnabled
+          ? firstSubName
+            ? `<span class="sub-on-first-sub" title="First substitute: ${esc(firstSubName)}">${esc(firstSubName)}</span>`
+            : ""
+          : `<span class="cell-events">${eventMarks(r)}</span>`;
+        return `<td class="match-cell"><div class="played-cell"><span class="cell-participation">${participation}</span><span class="minute-value">${Math.round(r.minutes_played || 0)}′</span>${valueMarkup}<span class="position-badge">${esc(r.match_position || "")}</span>${eventsMarkup}</div></td>`;
       }).join("");
       const shirtNumber = shirtNumbers.get(p.source_player_id);
       const playerName = p.player_display_name || p.player_name;
@@ -1149,6 +1238,10 @@ async function match(data) {
     sideButton.textContent = sideFilterOn ? (selectedTeamSide === "home" ? "Home" : "Away") : "Any";
     sideButton.classList.toggle("active", sideFilterOn);
     sideButton.setAttribute("aria-pressed", String(sideFilterOn));
+    const subOnButton = controls.querySelector("[data-match-sub-on]");
+    subOnButton.textContent = subOnEnabled ? "On" : "Off";
+    subOnButton.classList.toggle("active", subOnEnabled);
+    subOnButton.setAttribute("aria-pressed", String(subOnEnabled));
     const numberSort = gridSortKey === "number";
     const playerSort = gridSortKey === "player";
     content.innerHTML = matches.length
@@ -1175,6 +1268,7 @@ async function match(data) {
     const teamButton = event.target.closest("[data-match-team]");
     const compButton = event.target.closest("[data-match-competition]");
     const sideButton = event.target.closest("[data-match-side]");
+    const subOnButton = event.target.closest("[data-match-sub-on]");
     if (teamButton) {
       teamValue = teamButton.dataset.matchTeam;
       competitionValue = "all";
@@ -1191,6 +1285,9 @@ async function match(data) {
       gridSortKey = "match";
       gridSortMatchIndex = 0;
       gridSortDirection = -1;
+      render();
+    } else if (subOnButton) {
+      subOnEnabled = !subOnEnabled;
       render();
     }
   });
@@ -1210,7 +1307,7 @@ async function match(data) {
   });
   stat.addEventListener("change", () => {
     statValue = stat.value;
-    selectedMetricValue.textContent = `Metric: ${stat.selectedOptions[0]?.textContent || ""}`;
+    selectedMetricValue.textContent = stat.selectedOptions[0]?.textContent || "";
     render();
   });
   const gamesSelect = controls.querySelector("#match-games");
