@@ -1539,6 +1539,11 @@ body[data-kind="players"] .ranking-table {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.rank-subon,
+.rank-minutes,
+.rank-apps {
+  font-size: clamp(11px, 1vw, 14px);
+}
 .rank-subon-content {
   display: inline-flex;
   align-items: baseline;

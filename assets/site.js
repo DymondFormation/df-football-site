@@ -469,7 +469,7 @@ async function rankings(data) {
   let matchNextSide = params.get("match_side") === "1";
   let subOnEnabled = params.get("sub_on") === "1";
   let lastXIOnly = params.get("last_xi") === "1";
-  let startersOnly = params.get("starters") === "1";
+  let startersOnly = params.get("starters") === "1" || subOnEnabled;
   const maximumRecentGames = Math.max(1, Number(data.recent_games) || 10);
   const selected = {
     regions: new Set(params.getAll("region")),
@@ -823,10 +823,11 @@ async function rankings(data) {
       const scale = modeValue === "per95" ? 95 : 90;
       const starter = Number(r.starter_stats?.[stat.value] || 0);
       const substitute = Math.max(0, Number(r.sub_on_stats?.[stat.value] || 0) - starter);
-      if (modeValue === "total") return [starter, substitute];
+      const combined = Number(r.sub_on_stats?.[stat.value] || 0);
+      if (modeValue === "total") return [combined, substitute];
       return [
-        (starter * scale) / Number(r.sub_on_starter_minutes || 1),
-        (substitute * scale) / Number(r.sub_on_substitute_minutes || 1),
+        (combined * scale) / Number(r.sub_on_minutes || 1),
+        (substitute * scale) / Number(r.sub_on_minutes || 1),
       ];
     };
     const sortValue = (r) => {
@@ -866,7 +867,10 @@ async function rankings(data) {
               const playerPosition = r.position || r.tactical_role || "";
               const metricDecimals = modeValue === "total" ? 0 : stat.value === "passes" ? 1 : 2;
               const [starterSubOn, substituteSubOn] = subOnParts(r);
-              return `<tr><td class="rank-player"><div class="rank-player-cell"><button class="expand" data-detail="${r.detail}" aria-expanded="false" aria-label="Show recent appearances">+</button><span class="rank-player-copy"><span class="rank-player-name" title="${esc(playerName(r))}">${esc(playerName(r))}</span>${playerPosition ? `<span class="rank-player-position">${esc(playerPosition)}</span>` : ""}</span></div></td><td class="rank-info"><div class="rank-info-team">${image("teams", r.source_team_id, r.team_name)}<span class="rank-info-name" title="${esc(r.team_name)}">${esc(r.team_name)}</span></div>${matchLink}</td><td class="rank-metric">${value(r).toFixed(metricDecimals)}</td>${subOnEnabled ? `<td class="rank-subon"><span class="rank-subon-content"><span class="rank-subon-starter">${starterSubOn.toFixed(metricDecimals)}</span><small class="rank-subon-substitute">(${substituteSubOn.toFixed(metricDecimals)})</small></span></td>` : ""}<td>${Math.round(r.minutes)}</td><td>${r.matches} (${Math.max(0, Number(r.matches || 0) - Number(r.starts || 0))})</td></tr>`;
+              const substituteContribution = Number(r.sub_on_substitute_minutes || 0) > 0
+                ? `<small class="rank-subon-substitute">(${substituteSubOn.toFixed(metricDecimals)})</small>`
+                : "";
+              return `<tr><td class="rank-player"><div class="rank-player-cell"><button class="expand" data-detail="${r.detail}" aria-expanded="false" aria-label="Show recent appearances">+</button><span class="rank-player-copy"><span class="rank-player-name" title="${esc(playerName(r))}">${esc(playerName(r))}</span>${playerPosition ? `<span class="rank-player-position">${esc(playerPosition)}</span>` : ""}</span></div></td><td class="rank-info"><div class="rank-info-team">${image("teams", r.source_team_id, r.team_name)}<span class="rank-info-name" title="${esc(r.team_name)}">${esc(r.team_name)}</span></div>${matchLink}</td><td class="rank-metric">${value(r).toFixed(metricDecimals)}</td>${subOnEnabled ? `<td class="rank-subon"><span class="rank-subon-content"><span class="rank-subon-starter">${starterSubOn.toFixed(metricDecimals)}</span>${substituteContribution}</span></td>` : ""}<td class="rank-minutes">${Math.round(r.minutes)}</td><td class="rank-apps">${r.matches} (${Math.max(0, Number(r.matches || 0) - Number(r.starts || 0))})</td></tr>`;
             },
           )
           .join("")}</tbody></table></div>${filtered.length > limit ? '<button id="more">Show 50 more</button>' : ""}`
@@ -961,6 +965,7 @@ async function rankings(data) {
   });
   rankSubOnToggle.addEventListener("click", () => {
     subOnEnabled = !subOnEnabled;
+    if (subOnEnabled) startersOnly = true;
     syncUrl();
     render();
   });
@@ -971,6 +976,7 @@ async function rankings(data) {
   });
   starterToggle.addEventListener("click", () => {
     startersOnly = !startersOnly;
+    if (!startersOnly && subOnEnabled) subOnEnabled = false;
     syncUrl();
     load().catch(showError);
   });
@@ -1208,7 +1214,7 @@ async function match(data) {
         const firstSubName = subOnRecord?.first_sub_short_display_name || "";
         const valueMarkup = subOnEnabled
           ? r.started === true
-            ? `<strong class="match-stat-starter">${esc(starterValue)}</strong>${substituteMarkup}`
+            ? `<strong class="match-stat-starter">${esc(value)}</strong>${substituteMarkup}`
             : `<img class="sub-on-attribution-icon" src="${root}assets/images/icons/unused_sub.png" alt="" title="Substitute stats attributed to starter">`
           : `<strong>${esc(value)}</strong>`;
         const eventsMarkup = subOnEnabled
